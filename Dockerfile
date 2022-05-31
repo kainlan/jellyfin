@@ -39,7 +39,6 @@ RUN apt-get update \
  && apt-get update \
  && apt-get install --no-install-recommends --no-install-suggests -y \
    mesa-va-drivers \
-   jellyfin-ffmpeg \
    openssl \
    locales \
 # Intel VAAPI Tone mapping dependencies:
@@ -53,6 +52,7 @@ RUN apt-get update \
  && wget https://github.com/intel/compute-runtime/releases/download/${NEO_VERSION}/intel-opencl_${NEO_VERSION}_amd64.deb \
  && wget https://github.com/intel/compute-runtime/releases/download/${NEO_VERSION}/intel-ocloc_${NEO_VERSION}_amd64.deb \
  && wget https://github.com/intel/compute-runtime/releases/download/${NEO_VERSION}/intel-level-zero-gpu_${LEVEL_ZERO_VERSION}_amd64.deb \
+ && wget https://github.com/kainlan/jellyfin-ffmpeg/releases/download/v5.0.1-4/jellyfin-ffmpeg5_5.0.1-5-bullseye_amd64.deb \
  && dpkg -i *.deb \
  && cd .. \
  && rm -rf intel-compute-runtime \
@@ -71,49 +71,6 @@ ENV LC_ALL en_US.UTF-8
 ENV LANG en_US.UTF-8
 ENV LANGUAGE en_US:en
 
-FROM debian:bullseye as CustomFFMPEG
-RUN apt-get update && apt-get install -y git \
-&& git clone https://github.com/kainlan/jellyfin-ffmpeg
-WORKDIR /jellyfin-ffmpeg/
-
-# Docker build arguments
-ARG SOURCE_DIR=/ffmpeg
-ARG ARTIFACT_DIR=/dist
-# Docker run environment
-ENV DEB_BUILD_OPTIONS=noddebs
-ENV DEBIAN_FRONTEND=noninteractive
-ENV ARCH=amd64
-ENV GCC_VER=10
-ENV SOURCE_DIR=/ffmpeg
-ENV ARTIFACT_DIR=/dist
-ENV TARGET_DIR=/usr/lib/jellyfin-ffmpeg
-ENV DPKG_INSTALL_LIST=${SOURCE_DIR}/debian/jellyfin-ffmpeg5.install
-ENV PATH=${TARGET_DIR}/bin:${PATH}
-ENV PKG_CONFIG_PATH=${TARGET_DIR}/lib/pkgconfig:${PKG_CONFIG_PATH}
-ENV LD_LIBRARY_PATH=${TARGET_DIR}/lib:${TARGET_DIR}/lib/mfx:${TARGET_DIR}/lib/xorg:${LD_LIBRARY_PATH}
-ENV LDFLAGS="-Wl,-rpath=${TARGET_DIR}/lib -L${TARGET_DIR}/lib"
-ENV CXXFLAGS="-I${TARGET_DIR}/include $CXXFLAGS"
-ENV CPPFLAGS="-I${TARGET_DIR}/include $CPPFLAGS"
-ENV CFLAGS="-I${TARGET_DIR}/include $CFLAGS"
-
-# Prepare Debian build environment
-RUN apt-get update \
- && yes | apt-get install -y apt-transport-https curl ninja-build debhelper gnupg wget devscripts mmv equivs git nasm pkg-config subversion dh-autoreconf libpciaccess-dev libwayland-dev libx11-dev libx11-xcb-dev libxcb-dri2-0-dev libxcb-dri3-dev libxcb-present-dev libxcb-shm0-dev libxcb-sync-dev libxshmfence-dev libxext-dev libxfixes-dev libxcb1-dev libxrandr-dev libzstd-dev libelf-dev libudev-dev python3-pip python3-mako zip unzip tar flex bison
-
-# Install meson and cmake
-RUN pip3 install meson cmake
-# Avoids timeouts when using git and disable the detachedHead advice
-RUN git config --global http.postbuffer 524288000 && git config --global advice.detachedHead false
-# Link to docker-build script
-RUN ln -sf ${SOURCE_DIR}/docker-build.sh /docker-build.sh
-
-VOLUME ${ARTIFACT_DIR}/
-
-COPY . ${SOURCE_DIR}/
-
-RUN ./docker-build.sh
-
-
 FROM mcr.microsoft.com/dotnet/sdk:${DOTNET_VERSION} as builder
 WORKDIR /repo
 COPY . .
@@ -129,7 +86,6 @@ ENV HEALTHCHECK_URL=http://localhost:8096/health
 
 COPY --from=builder /jellyfin /jellyfin
 COPY --from=web-builder /dist /jellyfin/jellyfin-web
-COPY --from=CustomFFMPEG /ffmpeg /usr/lib/jellyfin-ffmpeg/ffmpeg
 
 EXPOSE 8096
 VOLUME /cache /config /media
